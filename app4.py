@@ -9,23 +9,20 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 st.set_page_config(page_title="Nova GPU Manufacturing Operations Dashboard", layout="wide")
 
+
 # --- Data Generation and Loading Functions ---
 def load_or_create_inventory_data():
     filepath = "data/inventory_data.csv"
     if os.path.exists(filepath):
         data = pd.read_csv(filepath)
-        # Ensure Safety Stock column exists and has non-zero values
-        if 'Safety Stock' not in data.columns or data['Safety Stock'].sum() == 0:
-            data['Safety Stock'] = np.random.randint(10, 50, len(data))
-            data.to_csv(filepath, index=False)  # Save updated data
         return data
     else:
         data = pd.DataFrame({
             'Component': ['GPU Chip', 'Memory Module', 'PCB', 'Cooling Fan', 'Casing', 'VRM Module', 'Thermal Paste'],
-            'Initial Inventory': np.random.randint(100, 300, 7),
+            'Initial Inventory': [250, 180, 150, 100, 160, 90, 120],
             'Lead Time (days)': [10, 7, 15, 5, 8, 9, 2],
-            'Scheduled Receipts': np.random.randint(50, 150, 7),
-            'Safety Stock': np.random.randint(10, 50, 7)  # Adding Safety Stock
+            'Scheduled Receipts': [100, 75, 80, 60, 90, 70, 40],
+            'Safety Stock': [30, 25, 20, 15, 25, 20, 10]
         })
         os.makedirs("data", exist_ok=True)
         data.to_csv(filepath, index=False)
@@ -37,7 +34,10 @@ def load_or_create_demand_data():
         return pd.read_csv(filepath, parse_dates=['Month'])
     else:
         months = pd.date_range(start='2025-01-01', periods=12, freq='M')
-        demand = np.random.poisson(lam=300, size=12)
+        # Assuming realistic demand pattern with some seasonality and variability
+        base_demand = np.array([300, 310, 320, 350, 370, 400, 420, 410, 390, 360, 340, 330])
+        demand_noise = np.random.randint(-20, 21, size=12)
+        demand = base_demand + demand_noise
         data = pd.DataFrame({'Month': months, 'Demand': demand})
         os.makedirs("data", exist_ok=True)
         data.to_csv(filepath, index=False)
@@ -64,8 +64,8 @@ def load_or_create_jobs_data():
     else:
         jobs = ['Design', 'Wafer Fabrication', 'Photolithography', 'Etching', 'Metallization',
                 'Testing (Pre-dicing)', 'Dicing', 'Packaging', 'Final Testing', 'Shipping']
-        processing_times = np.random.randint(2, 10, len(jobs))
-        due_dates = np.random.randint(10, 30, len(jobs))
+        processing_times = [4, 8, 6, 5, 7, 3, 4, 2, 3, 1]  # In days
+        due_dates = [15, 18, 20, 22, 24, 25, 26, 28, 29, 30]  # Due days from today
         data = pd.DataFrame({'Job': jobs, 'Processing Time (days)': processing_times, 'Due Date (days from today)': due_dates})
         os.makedirs("data", exist_ok=True)
         data.to_csv(filepath, index=False)
@@ -88,6 +88,11 @@ def exponential_smoothing_forecast(demand, alpha=0.5):
     model = ExponentialSmoothing(demand, trend=None, seasonal=None)
     fit = model.fit(smoothing_level=alpha, optimized=False)
     return fit.fittedvalues
+
+# --- EOQ Calculation ---
+def calculate_eoq(demand_rate, ordering_cost, holding_cost):
+    # EOQ = sqrt(2DS / H)
+    return np.sqrt((2 * demand_rate * ordering_cost) / holding_cost)
 
 # Gantt Chart for Scheduling
 def create_gantt_chart(jobs_df, sequence):
@@ -146,7 +151,8 @@ with st.sidebar:
         "About Nova", 
         "Inventory Management", 
         "Demand Forecasting", 
-        "Material Requirement Planning",  # MRP moved before Job Scheduling
+        "Material Requirement Planning",
+        "EOQ vs MRP",
         "Job Scheduling", 
         "Facility Layout Design", 
         "House of Quality"
@@ -171,10 +177,11 @@ if tab == "About Nova":
     - Reducing inventory waste
     - Enhancing alignment with dynamic customer demands
 
-    ### Key Goals
+    ### Key Goals of the Project Aurora
     - ✅ Improve forecast accuracy
     - ✅ Minimize inventory waste (MUDA)
     - ✅ Optimize scheduling and production efficiency
+    - ✅ House of Quality (QFD) for customer satisfaction
     """)
 
 
@@ -239,10 +246,6 @@ elif tab == "Material Requirement Planning":
 
     forecast_data = pd.read_csv(forecast_path, parse_dates=['Month'])
 
-    # Debugging: Print the forecast dataframe
-    st.subheader("Debug: Forecast Dataframe")
-    st.dataframe(forecast_data)
-
     st.subheader("Forecasted Demand for Next Month")
     st.dataframe(forecast_data)
 
@@ -283,6 +286,84 @@ elif tab == "Material Requirement Planning":
     if st.button("Save MRP Plan"):
         mrp[['Component', 'Gross Requirements', 'Available Inventory', 'Scheduled Receipts', 'Safety Stock', 'Net Requirements']].to_csv("data/mrp_data.csv", index=False)
         st.success("MRP Plan saved!")
+
+elif tab == "EOQ vs MRP":
+    st.header("EOQ vs MRP Comparison")
+
+    st.subheader("Assumptions for EOQ")
+    ordering_cost = st.number_input("Ordering Cost per Order ($)", value=200)
+    holding_cost_per_unit = st.number_input("Annual Holding Cost per Unit ($)", value=2.5)
+
+    # Average monthly demand from hardcoded demand_data
+    avg_monthly_demand = demand_data['Demand'].mean()
+    annual_demand = avg_monthly_demand * 12
+
+    st.write(f"**Annual Demand Estimate:** {annual_demand:.0f} units")
+
+    eoq = calculate_eoq(annual_demand, ordering_cost, holding_cost_per_unit)
+    st.write(f"**EOQ (Economic Order Quantity):** {eoq:.2f} units")
+
+    st.latex(r'EOQ = \sqrt{\frac{2DS}{H}}')
+
+    # MRP for latest forecast
+    forecast_path = "data/next_month_forecast.csv"
+    if os.path.exists(forecast_path):
+        forecast_qty = pd.read_csv(forecast_path)['Forecast'].values[0]
+        st.write(f"**Next Month MRP Forecast Quantity:** {int(forecast_qty)} units")
+    else:
+        st.warning("Run demand forecast and save it before comparing with MRP.")
+
+    st.subheader("Comparison Summary")
+    st.markdown(f"""
+    | Method | Logic | Result |
+    |--------|-------|--------|
+    | EOQ | Based on fixed costs & average demand | {eoq:.2f} units |
+    | MRP | Based on dynamic forecast and BOM | {int(forecast_qty) if 'forecast_qty' in locals() else 'N/A'} units |
+    """)
+
+    st.subheader("Component-wise EOQ vs MRP Visualization")
+
+    # Component-wise EOQ assumes: demand is evenly spread among BOM components
+    bom = load_or_create_bom_data()
+    inventory = load_or_create_inventory_data()
+
+    # Use same ordering & holding cost assumptions for all components
+    annual_demand = avg_monthly_demand * 12
+    eoq_component_wise = []
+
+    for _, row in bom.iterrows():
+        comp = row['Component']
+        qty_per_gpu = row['Quantity per GPU']
+        demand_comp = annual_demand * qty_per_gpu  # component-level annual demand
+        eoq_value = calculate_eoq(demand_comp, ordering_cost, holding_cost_per_unit)
+        eoq_component_wise.append({'Component': comp, 'EOQ': eoq_value})
+
+    eoq_df = pd.DataFrame(eoq_component_wise)
+
+    # Load MRP data
+    if os.path.exists("data/mrp_data.csv"):
+        mrp_df = pd.read_csv("data/mrp_data.csv")[['Component', 'Net Requirements']]
+    else:
+        st.warning("Generate and save MRP plan first!")
+        mrp_df = pd.DataFrame(columns=['Component', 'Net Requirements'])
+
+    # Merge EOQ and MRP
+    comparison_df = pd.merge(eoq_df, mrp_df, on='Component', how='outer')
+
+    # Plot
+    fig = px.bar(comparison_df.melt(id_vars='Component', value_name='Quantity', var_name='Method'),
+                 x='Component', y='Quantity', color='Method', barmode='group',
+                 title="EOQ vs MRP per Component")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+    st.markdown("""
+    **Insight:**
+    - EOQ simplifies inventory replenishment assuming stable demand.
+    - MRP adapts to time-varying forecasts and multi-component structures.
+    - Use EOQ for raw materials with steady consumption, and MRP for assembly-focused planning.
+    """)
+
 
 elif tab == "Job Scheduling":
     st.header("Job Scheduling")

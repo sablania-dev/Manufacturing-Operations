@@ -1,0 +1,11 @@
+Job,Processing Time (days),Due Date (days from today)
+Design,4,15
+Wafer Fabrication,8,18
+Photolithography,6,20
+Etching,5,22
+Metallization,7,24
+Testing (Pre-dicing),3,25
+Dicing,4,26
+Packaging,2,28
+Final Testing,3,29
+Shipping,1,30

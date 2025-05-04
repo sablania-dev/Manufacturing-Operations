@@ -1,0 +1,8 @@
+Component,Initial Inventory,Lead Time (days),Scheduled Receipts,Safety Stock
+GPU Chip,250,10,100,30
+Memory Module,180,7,75,25
+PCB,150,15,80,20
+Cooling Fan,100,5,60,15
+Casing,160,8,90,25
+VRM Module,90,9,70,20
+Thermal Paste,120,2,40,10
